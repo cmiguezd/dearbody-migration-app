@@ -11,7 +11,12 @@ const menusQuery = `query Menus { menus(first: 50) { nodes { title handle items 
 const createMenu = `mutation Menu($title: String!, $handle: String!, $items: [MenuItemCreateInput!]!) { menuCreate(title: $title, handle: $handle, items: $items) { menu { id handle } userErrors { field message } } }`;
 const filesQuery = `query Files { files(first: 100, query: "status:ready") { nodes { alt contentType url } } }`;
 const createFiles = `mutation Files($files: [FileCreateInput!]!) { fileCreate(files: $files) { files { id url } userErrors { field message } } }`;
-function requiredSession(shop: string) { const session = getSession(shop); if (!session) throw new Error(`La tienda ${shop} aún no está autorizada en la app.`); return session; }
+function requiredSession(shop: string) {
+  const session = getSession(shop);
+  if (session) return session;
+  if (shop === (process.env.SOURCE_STORE || "dearbody-colombia-f1vuyjy7.myshopify.com") && process.env.SOURCE_ACCESS_TOKEN) return { shop, accessToken: process.env.SOURCE_ACCESS_TOKEN, scopes: [], installedAt: "server-configured" };
+  throw new Error(`La tienda ${shop} aún no está autorizada en la app.`);
+}
 export async function executeMigration(plan: MigrationPlan): Promise<{ reports: Report[] }> {
   if (plan.selection.products || plan.selection.metafields) throw new Error("Productos y valores de metacampos están bloqueados en esta plantilla.");
   const source = requiredSession(plan.sourceShop); const destination = requiredSession(plan.destinationShop);
