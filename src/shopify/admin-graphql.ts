@@ -8,7 +8,7 @@ export interface AdminGraphqlClient {
 }
 
 export function createAdminGraphqlClient(shop: string, accessToken: string): AdminGraphqlClient {
-  const apiVersion = process.env.SHOPIFY_API_VERSION || "2025-10";
+  const apiVersion = process.env.SHOPIFY_API_VERSION || "2026-07";
   const endpoint = `https://${shop}/admin/api/${apiVersion}/graphql.json`;
 
   return {
