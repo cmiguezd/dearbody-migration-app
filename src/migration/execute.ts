@@ -2,15 +2,21 @@ import { getSession } from "../auth/session.js";
 import { createAdminGraphqlClient } from "../shopify/admin-graphql.js";
 import type { MigrationPlan } from "./types.js";
 type Report = { module: string; status: "completed" | "skipped" | "failed"; count?: number; message?: string };
-const pagesQuery = `query Pages { pages(first: 250) { nodes { title handle body isPublished templateSuffix } } }`;
-const definitionsQuery = `query Definitions { metafieldDefinitions(first: 250, ownerType: PRODUCT) { nodes { name namespace key type { name } description } } }`;
+const pagesQuery = `query Pages { pages(first: 250) { nodes { id title handle body isPublished templateSuffix } } }`;
+const definitionsQuery = `query Definitions { metafieldDefinitions(first: 250, ownerType: PRODUCT) { nodes { id name namespace key type { name } description } } }`;
 const createPage = `mutation Page($page: PageCreateInput!) { pageCreate(page: $page) { page { id handle } userErrors { field message } } }`;
 const createDefinition = `mutation Definition($definition: MetafieldDefinitionInput!) { metafieldDefinitionCreate(definition: $definition) { createdDefinition { id namespace key } userErrors { field message } } }`;
 const createTheme = `mutation Theme($name: String!, $source: URL!) { themeCreate(name: $name, source: $source) { theme { id name role } userErrors { field message } } }`;
-const menusQuery = `query Menus { menus(first: 50) { nodes { title handle items { title url type items { title url type } } } } }`;
+const menusQuery = `query Menus { menus(first: 50) { nodes { id title handle items { title url type items { title url type } } } } }`;
 const createMenu = `mutation Menu($title: String!, $handle: String!, $items: [MenuItemCreateInput!]!) { menuCreate(title: $title, handle: $handle, items: $items) { menu { id handle } userErrors { field message } } }`;
-const filesQuery = `query Files { files(first: 100, query: "status:ready") { nodes { alt contentType url } } }`;
+const filesQuery = `query Files { files(first: 100, query: "status:ready") { nodes { id alt contentType url } } }`;
 const createFiles = `mutation Files($files: [FileCreateInput!]!) { fileCreate(files: $files) { files { id url } userErrors { field message } } }`;
+const deletePage = `mutation($id: ID!) { pageDelete(id: $id) { deletedPageId userErrors { message } } }`;
+const deleteDefinition = `mutation($id: ID!) { metafieldDefinitionDelete(id: $id) { deletedDefinitionId userErrors { message } } }`;
+const deleteMenu = `mutation($id: ID!) { menuDelete(id: $id) { deletedMenuId userErrors { message } } }`;
+const deleteFiles = `mutation($ids: [ID!]!) { fileDelete(fileIds: $ids) { deletedFileIds userErrors { message } } }`;
+const themesQuery = `query Themes { themes(first: 50) { nodes { id name role } } }`;
+const deleteTheme = `mutation($id: ID!) { themeDelete(id: $id) { deletedThemeId userErrors { message } } }`;
 function requiredSession(shop: string) {
   const session = getSession(shop);
   if (session) return session;
@@ -20,10 +26,18 @@ function requiredSession(shop: string) {
   if (shop === destinationStore && process.env.DESTINATION_ACCESS_TOKEN) return { shop, accessToken: process.env.DESTINATION_ACCESS_TOKEN, scopes: [], installedAt: "server-configured" };
   throw new Error(`La tienda ${shop} aún no está autorizada en la app.`);
 }
+async function cleanupDestination(to: ReturnType<typeof createAdminGraphqlClient>, selection: MigrationPlan["selection"]) {
+  if (selection.pages) { const r = await to.query<{ pages: { nodes: Array<{ id: string }> } }>(pagesQuery); for (const x of r.pages.nodes) await to.query(deletePage, { id: x.id }); }
+  if (selection.metafieldDefinitions) { const r = await to.query<{ metafieldDefinitions: { nodes: Array<{ id: string }> } }>(definitionsQuery); for (const x of r.metafieldDefinitions.nodes) await to.query(deleteDefinition, { id: x.id }); }
+  if (selection.menus) { const r = await to.query<{ menus: { nodes: Array<{ id: string }> } }>(menusQuery); for (const x of r.menus.nodes) await to.query(deleteMenu, { id: x.id }); }
+  if (selection.files) { const r = await to.query<{ files: { nodes: Array<{ id: string }> } }>(filesQuery); if (r.files.nodes.length) await to.query(deleteFiles, { ids: r.files.nodes.map((x) => x.id) }); }
+  if (selection.theme) { const r = await to.query<{ themes: { nodes: Array<{ id: string; role: string }> } }>(themesQuery); for (const x of r.themes.nodes.filter((t) => t.role === "UNPUBLISHED")) await to.query(deleteTheme, { id: x.id }); }
+}
 export async function executeMigration(plan: MigrationPlan): Promise<{ reports: Report[] }> {
   if (plan.selection.products || plan.selection.metafields) throw new Error("Productos y valores de metacampos están bloqueados en esta plantilla.");
   const source = requiredSession(plan.sourceShop); const destination = requiredSession(plan.destinationShop);
   const from = createAdminGraphqlClient(source.shop, source.accessToken); const to = createAdminGraphqlClient(destination.shop, destination.accessToken); const reports: Report[] = [];
+  if (!plan.dryRun) await cleanupDestination(to, plan.selection);
   if (plan.selection.pages) { const result = await from.query<{ pages: { nodes: Array<{ title: string; handle: string; body: string; isPublished: boolean; templateSuffix: string | null }> } }>(pagesQuery); let count = 0; for (const page of result.pages.nodes) { if (!plan.dryRun) { const created = await to.query<{ pageCreate: { userErrors: Array<{ message: string }> } }>(createPage, { page: { title: page.title, handle: page.handle, body: page.body, isPublished: page.isPublished, templateSuffix: page.templateSuffix } }); if (created.pageCreate.userErrors.length) throw new Error(created.pageCreate.userErrors.map((e) => e.message).join("; ")); } count++; } reports.push({ module: "pages", status: plan.dryRun ? "skipped" : "completed", count, message: plan.dryRun ? "Simulación; no se escribieron páginas." : undefined }); }
   if (plan.selection.metafieldDefinitions) { const result = await from.query<{ metafieldDefinitions: { nodes: Array<{ name: string; namespace: string; key: string; type: { name: string }; description: string | null }> } }>(definitionsQuery); let count = 0; for (const definition of result.metafieldDefinitions.nodes) { if (!plan.dryRun) { const created = await to.query<{ metafieldDefinitionCreate: { userErrors: Array<{ message: string }> } }>(createDefinition, { definition: { name: definition.name, namespace: definition.namespace, key: definition.key, type: definition.type.name, description: definition.description, ownerType: "PRODUCT" } }); const errors = created.metafieldDefinitionCreate.userErrors; if (errors.length && !errors.some((e) => /already exists|taken/i.test(e.message))) throw new Error(errors.map((e) => e.message).join("; ")); } count++; } reports.push({ module: "metafieldDefinitions", status: plan.dryRun ? "skipped" : "completed", count, message: plan.dryRun ? "Simulación; no se escribieron definiciones." : undefined }); }
   if (plan.selection.theme) { if (plan.dryRun) reports.push({ module: "theme", status: "skipped", message: "Simulación; el tema no se publicó." }); else { const source = `${process.env.SHOPIFY_APP_URL || ""}/template-theme.zip`; const created = await to.query<{ themeCreate: { theme: { id: string } | null; userErrors: Array<{ message: string }> } }>(createTheme, { name: "Dearbody Template", source }); if (created.themeCreate.userErrors.length || !created.themeCreate.theme) throw new Error(created.themeCreate.userErrors.map((e) => e.message).join("; ") || "Shopify no creó el tema"); reports.push({ module: "theme", status: "completed", count: 1 }); } }
