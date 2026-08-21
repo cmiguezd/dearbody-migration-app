@@ -1,7 +1,9 @@
 import express from "express";
+import { migrationRouter } from "./routes/migrations.js";
 
 const app = express();
 app.use(express.json());
+app.use("/api/migrations", migrationRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true, service: "dearbody-migration-app" }));
 app.get("/", (_req, res) => res.status(200).send("Dearbody Store Migration"));
