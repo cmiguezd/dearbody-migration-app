@@ -14,7 +14,10 @@ const createFiles = `mutation Files($files: [FileCreateInput!]!) { fileCreate(fi
 function requiredSession(shop: string) {
   const session = getSession(shop);
   if (session) return session;
-  if (shop === (process.env.SOURCE_STORE || "dearbody-colombia-f1vuyjy7.myshopify.com") && process.env.SOURCE_ACCESS_TOKEN) return { shop, accessToken: process.env.SOURCE_ACCESS_TOKEN, scopes: [], installedAt: "server-configured" };
+  const sourceStore = process.env.SOURCE_STORE || "dearbody-colombia-f1vuyjy7.myshopify.com";
+  const destinationStore = process.env.DESTINATION_STORE || "dearbody-template-client-hjsvcqyt.myshopify.com";
+  if (shop === sourceStore && process.env.SOURCE_ACCESS_TOKEN) return { shop, accessToken: process.env.SOURCE_ACCESS_TOKEN, scopes: [], installedAt: "server-configured" };
+  if (shop === destinationStore && process.env.DESTINATION_ACCESS_TOKEN) return { shop, accessToken: process.env.DESTINATION_ACCESS_TOKEN, scopes: [], installedAt: "server-configured" };
   throw new Error(`La tienda ${shop} aún no está autorizada en la app.`);
 }
 export async function executeMigration(plan: MigrationPlan): Promise<{ reports: Report[] }> {
