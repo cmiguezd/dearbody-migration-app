@@ -1,5 +1,6 @@
 import express from "express";
 import { migrationRouter } from "./routes/migrations.js";
+import { inspectRouter } from "./routes/inspect.js";
 import { authRouter } from "./routes/auth.js";
 import { shopsRouter } from "./routes/shops.js";
 import { appRouter } from "./routes/app.js";
@@ -7,6 +8,7 @@ import { appRouter } from "./routes/app.js";
 const app = express();
 app.use(express.json());
 app.use("/api/migrations", migrationRouter);
+app.use("/api/inspect", inspectRouter);
 app.use("/api/shops", shopsRouter);
 app.use("/auth", authRouter);
 app.use("/app", appRouter);
